@@ -1,12 +1,11 @@
 tqdm
 rich
 ninja
-numpy
 pandas
 scipy
 scikit-learn
 matplotlib
-opencv-python
+opencv-python-headless
 imageio
 imageio-ffmpeg
 omegaconf
