@@ -12,7 +12,6 @@ imageio-ffmpeg
 omegaconf
 argparse
 torch
-torchvision
 einops
 plyfile
 pygltflib
