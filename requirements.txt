@@ -1,6 +1,7 @@
 tqdm
 rich
 ninja
+numpy
 pandas
 scipy
 scikit-learn
