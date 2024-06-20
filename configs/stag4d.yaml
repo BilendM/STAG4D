@@ -24,7 +24,7 @@ load:
 outdir: logs
 mesh_format: obj
 save_path: ???
-save_step: 10
+save_step: 8000
 #checkpoint to load for stage fine (should be a path of ply with deform pth)
 load_path:
 load_step:
