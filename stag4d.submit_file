@@ -11,11 +11,11 @@ JobBatchName = "STAG4D-on-minions-dataset"
 # --------------------------------------------
 # Executable and its arguments
 executable    = /workspace/miniconda3/envs/stag4d_env/bin/python
-arguments     = /workspace/STAG4D/main.py --config /workspace/STAG4D/configs/stag4d.yaml path=dataset/minions save_path=minions
+arguments     = /workspace/STAG4D/main.py --config /workspace/STAG4D/configs/stag4d.yaml path=/workspace/STAG4D/dataset/minions save_path=save_path=/workspace/STAG4D/minions
 # ---------------------------------------------------
 # Universe (vanilla, docker)
 universe         = docker
-docker_image = container-registry.surrey.ac.uk/shared-containers/stag4d:latest
+docker_image = container-registry.surrey.ac.uk/shared-containers/stag4d-test:latest
 
 # -------------------------------------------------
 # Event, out and error logs
@@ -36,17 +36,18 @@ should_transfer_files = YES
 # Requirements for the Job (Requirements are explained in further detail in example09.submit_file)
 # NOTE: HasStornext is not valid on orca.
 requirements = (CUDAGlobalMemoryMb > 4500) && (CUDAGlobalMemoryMb <  17000) && \
-			   (CUDACapability > 2.0)
+#              (HasStornext) && \
+               (CUDACapability > 2.0)
 
 # --------------------------------------
 # Resources
 request_GPUs     = 1
 # this needs to be specified for the AI@Surrey cluster if requesting a GPU
-+GPUMem          = 10000  
++GPUMem          = 12000 
 request_CPUs   = 3 
 # tailor the number of CPUs to your needs - check epoch time or GPU power usage via 
 # https://wandb.ai/site to know that you're not staving the GPU
-request_memory   = 2G
+request_memory   = 16G
 
 #This job will complete in less than 1 hour
 +JobRunTime = 1
