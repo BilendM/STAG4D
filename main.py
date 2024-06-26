@@ -16,17 +16,19 @@ from cam_utils import orbit_camera, OrbitCamera
 from gs_renderer_4d import Renderer, MiniCam
 from dataset_4d import SparseDataset
 
+
 def save_image_to_local(image_tensor, file_path):
     # Ensure the image tensor is in the range [0, 1]
-    image_tensor = image_tensor.clamp(0, 1) 
+    image_tensor = image_tensor.clamp(0, 1)
 
     # Save the image tensor to the specified file path
     vutils.save_image(image_tensor, file_path)
 
+
 class GUI:
     def __init__(self, opt):
         self.opt = opt  # shared with the trainer's opt to support in-place modification of rendering parameters.
-        self.gui = opt.gui # enable gui
+        self.gui = opt.gui  # enable gui
         self.W = opt.W
         self.H = opt.H
         self.cam = OrbitCamera(opt.W, opt.H, r=opt.radius, fovy=opt.fovy)
@@ -58,8 +60,8 @@ class GUI:
         self.input_mask_torch = None
         self.overlay_input_img = False
         self.overlay_input_img_ratio = 0.5
-        
-        #self.use_depth = opt.use_depth
+
+        # self.use_depth = opt.use_depth
 
         # input text
         self.prompt = ""
@@ -73,33 +75,44 @@ class GUI:
         self.time = 0
         self.train_steps = 1  # steps per rendering loop
         self.init = True
-        self.stage = 'coarse'
+        self.stage = "coarse"
         self.path = self.opt.path
         self.save_step = self.opt.save_step
-        
+
         if self.opt.size is not None:
             self.size = self.opt.size
         else:
-            self.size = len(os.listdir(os.path.join(self.path,'ref')))
-        self.frames=self.size
-        self.dataset = SparseDataset(self.opt, self.size, H=self.H, W=self.W, device=self.device)
-        self.dataloader =self.dataset.dataloader()
+            self.size = len(os.listdir(os.path.join(self.path, "ref")))
+        self.frames = self.size
+        self.dataset = SparseDataset(
+            self.opt, self.size, H=self.H, W=self.W, device=self.device
+        )
+        self.dataloader = self.dataset.dataloader()
         self.iter = iter(self.dataloader)
-        self.ref_view_batch, self.input_mask_batch,self.zero123_view_batch,self.zero123_masks_batch = next(self.iter)
-        self.input_img_torch_batch,self.input_mask_torch_batch,self.zero123plus_imgs_torch_batch,self.zero123plus_masks_torch_batch=[],[],[],[]
-        
+        (
+            self.ref_view_batch,
+            self.input_mask_batch,
+            self.zero123_view_batch,
+            self.zero123_masks_batch,
+        ) = next(self.iter)
+        (
+            self.input_img_torch_batch,
+            self.input_mask_torch_batch,
+            self.zero123plus_imgs_torch_batch,
+            self.zero123plus_masks_torch_batch,
+        ) = [], [], [], []
 
         # load input data from cmdline
         if self.opt.input is not None:
             self.load_input(self.opt.input)
-        
+
         # override prompt from cmdline
         if self.opt.prompt is not None:
             self.prompt = self.opt.prompt
 
         # override if provide a checkpoint
-        
-        self.renderer.initialize(num_pts=self.opt.num_pts)            
+
+        self.renderer.initialize(num_pts=self.opt.num_pts)
 
         self.point_nums = []
         if self.gui:
@@ -125,64 +138,110 @@ class GUI:
         torch.backends.cudnn.benchmark = True
 
         self.last_seed = seed
-        
-    def prepare_image(self,idx):
+
+    def prepare_image(self, idx):
         # input image
         if self.input_img is not None:
-            self.input_img_torch = torch.from_numpy(self.input_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
-            self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+            self.input_img_torch = (
+                torch.from_numpy(self.input_img)
+                .permute(2, 0, 1)
+                .unsqueeze(0)
+                .to(self.device)
+            )
+            self.input_img_torch = F.interpolate(
+                self.input_img_torch,
+                (self.opt.ref_size, self.opt.ref_size),
+                mode="bilinear",
+                align_corners=False,
+            )
 
-            self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)
-            self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
-        
-        self.zero123plus_imgs_torch=[]
-        self.zero123plus_masks_torch=[]
+            self.input_mask_torch = (
+                torch.from_numpy(self.input_mask)
+                .permute(2, 0, 1)
+                .unsqueeze(0)
+                .to(self.device)
+            )
+            self.input_mask_torch = F.interpolate(
+                self.input_mask_torch,
+                (self.opt.ref_size, self.opt.ref_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        self.zero123plus_imgs_torch = []
+        self.zero123plus_masks_torch = []
         # input image
         if self.input_imgs is not None:
             for i in np.arange(6):
-                #print(idx,i)
-                self.input_img2_torch=(torch.from_numpy(self.input_imgs[i]).permute(2, 0, 1).unsqueeze(0).to(self.device))
-                self.zero123plus_imgs_torch.append(F.interpolate(self.input_img2_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False))
+                # print(idx,i)
+                self.input_img2_torch = (
+                    torch.from_numpy(self.input_imgs[i])
+                    .permute(2, 0, 1)
+                    .unsqueeze(0)
+                    .to(self.device)
+                )
+                self.zero123plus_imgs_torch.append(
+                    F.interpolate(
+                        self.input_img2_torch,
+                        (self.opt.ref_size, self.opt.ref_size),
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                )
 
-                self.input_mask2_torch=torch.from_numpy(self.input_masks[i]).permute(2, 0, 1).unsqueeze(0).to(self.device)
-                self.zero123plus_masks_torch.append(F.interpolate(self.input_mask2_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False))
-                
+                self.input_mask2_torch = (
+                    torch.from_numpy(self.input_masks[i])
+                    .permute(2, 0, 1)
+                    .unsqueeze(0)
+                    .to(self.device)
+                )
+                self.zero123plus_masks_torch.append(
+                    F.interpolate(
+                        self.input_mask2_torch,
+                        (self.opt.ref_size, self.opt.ref_size),
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                )
+
         self.input_img_torch_batch.append(self.input_img_torch)
         self.input_mask_torch_batch.append(self.input_mask_torch)
         self.zero123plus_imgs_torch_batch.append(self.zero123plus_imgs_torch)
         self.zero123plus_masks_torch_batch.append(self.zero123plus_masks_torch)
-        
+
         # prepare embeddings
         with torch.no_grad():
-            self.guidance_zero123.get_img_embeds(self.input_img_torch, self.zero123plus_imgs_torch)
-
+            self.guidance_zero123.get_img_embeds(
+                self.input_img_torch, self.zero123plus_imgs_torch
+            )
 
     def prepare_train(self):
-
         self.step = 0
-        self.end_step = self.save_step+1
-        
+        self.end_step = self.save_step + 1
+
         ## given a load_path, load corresponding model
         if self.opt.load_path is not None:
-           if self.opt.load_step is not None:
-               self.step = self.opt.load_step
-           else:
-               #default loading save_step ply
-               self.step = self.save_step 
-           auto_path = os.path.join(self.opt.outdir,self.opt.load_path + str(self.step))
+            if self.opt.load_step is not None:
+                self.step = self.opt.load_step
+            else:
+                # default loading save_step ply
+                self.step = self.save_step
+            auto_path = os.path.join(
+                self.opt.outdir, self.opt.load_path + str(self.step)
+            )
 
-           ply_path = os.path.join(auto_path,'model.ply')
-           self.renderer.gaussians.load_model(auto_path)
-           self.renderer.gaussians.load_ply(ply_path)
-           self.end_step =self.step+self.end_step
-        
+            ply_path = os.path.join(auto_path, "model.ply")
+            self.renderer.gaussians.load_model(auto_path)
+            self.renderer.gaussians.load_ply(ply_path)
+            self.end_step = self.step + self.end_step
+
         ## setup training
         self.renderer.gaussians.training_setup(self.opt)
-        
+
         ## do not do progressive sh-level
         self.renderer.gaussians.active_sh_degree = self.renderer.gaussians.max_sh_degree
         self.optimizer = self.renderer.gaussians.optimizer
-        
+
         # default camera
         pose = orbit_camera(self.opt.elevation, 0, self.opt.radius)
         self.fixed_cam = MiniCam(
@@ -198,51 +257,48 @@ class GUI:
         self.enable_sd = self.opt.lambda_sd > 0 and self.prompt != ""
         self.enable_zero123 = self.opt.lambda_zero123 > 0 and self.input_img is not None
 
-
         print(f"[INFO] loading zero123...")
         from guidance.zero123_4d_utils import Zero123
+
         self.guidance_zero123 = Zero123(self.device)
         print(f"[INFO] loaded zero123!")
 
         ## load multiview reference images
         for i in np.arange(len(self.ref_view_batch)):
-                self.input_img =   self.ref_view_batch[i]
-                self.input_mask =  self.input_mask_batch[i]
-                self.input_imgs =  self.zero123_view_batch[i]
-                self.input_masks = self.zero123_masks_batch[i]
-                self.prepare_image(i)
-
+            self.input_img = self.ref_view_batch[i]
+            self.input_mask = self.input_mask_batch[i]
+            self.input_imgs = self.zero123_view_batch[i]
+            self.input_masks = self.zero123_masks_batch[i]
+            self.prepare_image(i)
 
     def train_step(self):
         starter = torch.cuda.Event(enable_timing=True)
         ender = torch.cuda.Event(enable_timing=True)
         starter.record()
 
-
-        
         torch.autograd.set_detect_anomaly(True)
         for _ in range(self.train_steps):
-
-            if self.step<self.opt.init_steps:
+            if self.step < self.opt.init_steps:
                 self.init = True
-                self.stage = 'coarse'
+                self.stage = "coarse"
             else:
                 self.init = False
-                self.stage = 'fine'
-            
+                self.stage = "fine"
+
             if self.step == self.end_step:
                 exit()
-                
+
             ## save model
             if self.step == self.save_step:
-                auto_path = os.path.join(self.opt.outdir,self.opt.save_path + str(self.step))
-                os.makedirs(auto_path,exist_ok=True)
-                ply_path = os.path.join(auto_path,'model.ply')
+                auto_path = os.path.join(
+                    self.opt.outdir, self.opt.save_path + str(self.step)
+                )
+                os.makedirs(auto_path, exist_ok=True)
+                ply_path = os.path.join(auto_path, "model.ply")
                 self.renderer.gaussians.save_ply(ply_path)
                 self.renderer.gaussians.save_deformation(auto_path)
-                
-            
-            if self.step>self.opt.position_lr_max_steps:
+
+            if self.step > self.opt.position_lr_max_steps:
                 self.opt.position_lr_max_steps = self.opt.position_lr_max_steps2
 
             self.step += 1
@@ -250,73 +306,80 @@ class GUI:
             viewspace_point_tensor_list = []
             radii_list = []
             visibility_filter_list = []
-            # update lr
+            # update lpathr
             self.renderer.gaussians.update_learning_rate(self.step)
-            self.guidance_zero123.update_step(0,self.step)
+            self.guidance_zero123.update_step(0, self.step)
 
             loss = 0
-            
-            if self.step%self.opt.valid_interval == 0:
-                self.save_renderings( 0, 0, 2 ,'front')
-                self.save_renderings( 180, 0, 2 ,'back')
-                
 
-            render_resolution = 128 if step_ratio < 0.3 else (256 if step_ratio < 0.6 else 512)
+            if self.step % self.opt.valid_interval == 0:
+                self.save_renderings(0, 0, 2, "front")
+                self.save_renderings(180, 0, 2, "back")
+
+            render_resolution = (
+                128 if step_ratio < 0.3 else (256 if step_ratio < 0.6 else 512)
+            )
 
             # avoid too large elevation (> 80 or < -80), and make sure it always cover [-30, 30]
             min_ver = max(min(-30, -30 - self.opt.elevation), -80 - self.opt.elevation)
             max_ver = min(max(30, 30 - self.opt.elevation), 80 - self.opt.elevation)
 
-
             for _ in np.arange(self.opt.batch_size):
-                
-                #sample time
+                # sample time
                 if self.init:
-                        self.t = self.frames//2
-                        self.time = self.t/self.frames
-                else:   
-                        self.t = np.random.randint(0,self.frames)
-                        self.time = self.t/self.frames
+                    self.t = self.frames // 2
+                    self.time = self.t / self.frames
+                else:
+                    self.t = np.random.randint(0, self.frames)
+                    self.time = self.t / self.frames
 
-                self.input_img_torch =   self.input_img_torch_batch[self.t]
-                self.input_mask_torch =  self.input_mask_torch_batch[self.t]
-                self.zero123plus_imgs_torch =  self.zero123plus_imgs_torch_batch[self.t]
-                self.zero123plus_masks_torch = self.zero123plus_masks_torch_batch[self.t]
-                
+                self.input_img_torch = self.input_img_torch_batch[self.t]
+                self.input_mask_torch = self.input_mask_torch_batch[self.t]
+                self.zero123plus_imgs_torch = self.zero123plus_imgs_torch_batch[self.t]
+                self.zero123plus_masks_torch = self.zero123plus_masks_torch_batch[
+                    self.t
+                ]
+
                 ## need to do rgb loss in the batch
                 cur_cam = self.fixed_cam
-                cur_cam.time=self.time
-                
-                out = self.renderer.render(cur_cam,stage=self.stage)
-                viewspace_point_tensor, visibility_filter, radii = out["viewspace_points"], out["visibility_filter"], out["radii"]  
+                cur_cam.time = self.time
+
+                out = self.renderer.render(cur_cam, stage=self.stage)
+                viewspace_point_tensor, visibility_filter, radii = (
+                    out["viewspace_points"],
+                    out["visibility_filter"],
+                    out["radii"],
+                )
                 radii_list.append(radii.unsqueeze(0))
                 visibility_filter_list.append(visibility_filter.unsqueeze(0))
                 viewspace_point_tensor_list.append(viewspace_point_tensor)
                 # rgb loss
-                image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
-                image_loss =step_ratio* 20000*  F.mse_loss(image, self.input_img_torch)
+                image = out["image"].unsqueeze(0)  # [1, 3, H, W] in [0, 1]
+                image_loss = (
+                    step_ratio * 20000 * F.mse_loss(image, self.input_img_torch)
+                )
                 loss = loss + image_loss
-                
+
                 alpha = out["alpha"].unsqueeze(0)
-                alpha_loss = step_ratio* 5000*  F.mse_loss(alpha, self.input_mask_torch)
+                alpha_loss = (
+                    step_ratio * 5000 * F.mse_loss(alpha, self.input_mask_torch)
+                )
                 loss = loss + alpha_loss
-                
+
                 images = []
                 poses = []
 
                 vers_plus, hors_plus, radii_plus = [], [], []
-                self.guidance_zero123.update_step(1,self.step)
+                self.guidance_zero123.update_step(1, self.step)
                 # render random view
                 ver = np.random.randint(min_ver, max_ver)
                 hor = np.random.randint(-180, 180)
                 radius = 0
-                
 
-                
+                pose = orbit_camera(
+                    self.opt.elevation + ver, hor, self.opt.radius + radius
+                )
 
-
-                pose = orbit_camera(self.opt.elevation + ver, hor, self.opt.radius + radius)
-                
                 poses.append(pose)
 
                 cur_cam = MiniCam(
@@ -328,55 +391,111 @@ class GUI:
                     self.cam.near,
                     self.cam.far,
                 )
-                cur_cam.time=self.time
-                if hor<30 and hor>-30 or np.random.rand()>0.4:
-                    idx=None
-                    vers_plus.append(torch.tensor(ver,device=self.device).unsqueeze(dim=0))
-                    hors_plus.append(torch.tensor(hor,device=self.device).unsqueeze(dim=0))
-                    radii_plus.append(torch.tensor(radius,device=self.device).unsqueeze(dim=0))
-                elif hor>0:
-                    idx=hor//60
-                    vers_plus.append(torch.tensor(ver-self.fixed_elevation[idx],device=self.device).unsqueeze(dim=0))
-                    hors_plus.append(torch.tensor(hor-self.fixed_azimuth[idx],device=self.device).unsqueeze(dim=0))
-                    radii_plus.append(torch.tensor(radius,device=self.device).unsqueeze(dim=0))
-                elif hor<0:
-                    idx = (360+hor)//60
-                    vers_plus.append(torch.tensor(ver-self.fixed_elevation[idx],device=self.device).unsqueeze(dim=0))
-                    hors_plus.append(torch.tensor(hor-self.fixed_azimuth[idx],device=self.device).unsqueeze(dim=0))
-                    radii_plus.append(torch.tensor(radius,device=self.device).unsqueeze(dim=0))
+                cur_cam.time = self.time
+                if hor < 30 and hor > -30 or np.random.rand() > 0.4:
+                    idx = None
+                    vers_plus.append(
+                        torch.tensor(ver, device=self.device).unsqueeze(dim=0)
+                    )
+                    hors_plus.append(
+                        torch.tensor(hor, device=self.device).unsqueeze(dim=0)
+                    )
+                    radii_plus.append(
+                        torch.tensor(radius, device=self.device).unsqueeze(dim=0)
+                    )
+                elif hor > 0:
+                    idx = hor // 60
+                    vers_plus.append(
+                        torch.tensor(
+                            ver - self.fixed_elevation[idx], device=self.device
+                        ).unsqueeze(dim=0)
+                    )
+                    hors_plus.append(
+                        torch.tensor(
+                            hor - self.fixed_azimuth[idx], device=self.device
+                        ).unsqueeze(dim=0)
+                    )
+                    radii_plus.append(
+                        torch.tensor(radius, device=self.device).unsqueeze(dim=0)
+                    )
+                elif hor < 0:
+                    idx = (360 + hor) // 60
+                    vers_plus.append(
+                        torch.tensor(
+                            ver - self.fixed_elevation[idx], device=self.device
+                        ).unsqueeze(dim=0)
+                    )
+                    hors_plus.append(
+                        torch.tensor(
+                            hor - self.fixed_azimuth[idx], device=self.device
+                        ).unsqueeze(dim=0)
+                    )
+                    radii_plus.append(
+                        torch.tensor(radius, device=self.device).unsqueeze(dim=0)
+                    )
 
-                bg_color = torch.tensor([1, 1, 1] if np.random.rand() > self.opt.invert_bg_prob else [0, 0, 0], dtype=torch.float32, device="cuda")
-                out = self.renderer.render(cur_cam, bg_color=bg_color,stage=self.stage)
-                viewspace_point_tensor, visibility_filter, radii_rendering = out["viewspace_points"], out["visibility_filter"], out["radii"]  
+                bg_color = torch.tensor(
+                    [1, 1, 1]
+                    if np.random.rand() > self.opt.invert_bg_prob
+                    else [0, 0, 0],
+                    dtype=torch.float32,
+                    device="cuda",
+                )
+                out = self.renderer.render(cur_cam, bg_color=bg_color, stage=self.stage)
+                viewspace_point_tensor, visibility_filter, radii_rendering = (
+                    out["viewspace_points"],
+                    out["visibility_filter"],
+                    out["radii"],
+                )
                 radii_list.append(radii_rendering.unsqueeze(0))
                 visibility_filter_list.append(visibility_filter.unsqueeze(0))
                 viewspace_point_tensor_list.append(viewspace_point_tensor)
-                image = out["image"].unsqueeze(0)# [1, 3, H, W] in [0, 1]
+                image = out["image"].unsqueeze(0)  # [1, 3, H, W] in [0, 1]
                 images.append(image)
-                
-                
-            
+
                 images_render = torch.cat(images, dim=0)
-                #poses = torch.from_numpy(np.stack(poses, axis=0)).to(self.device)
+                # poses = torch.from_numpy(np.stack(poses, axis=0)).to(self.device)
                 vers_batch = torch.cat(vers_plus, dim=0).cpu().numpy()
                 hors_batch = torch.cat(hors_plus, dim=0).cpu().numpy()
                 radii_batch = torch.cat(radii_plus, dim=0).cpu().numpy()
 
                 # guidance loss
                 # as we have different reference views, so each time we only pass 1 image into zero123 for guidance
-                zero123_loss = self.opt.lambda_zero123 * self.guidance_zero123.train_step(images_render, vers_batch, hors_batch, radii_batch, step_ratio,idx=idx,t = self.t)
+                zero123_loss = (
+                    self.opt.lambda_zero123
+                    * self.guidance_zero123.train_step(
+                        images_render,
+                        vers_batch,
+                        hors_batch,
+                        radii_batch,
+                        step_ratio,
+                        idx=idx,
+                        t=self.t,
+                    )
+                )
                 loss = loss + zero123_loss
-            
+
             # tv loss
-            scales = out['scales']
-            tv_loss = self.renderer.gaussians.compute_regulation(self.opt.time_smoothness_weight, self.opt.plane_tv_weight, self.opt.l1_time_planes)
+            scales = out["scales"]
+            tv_loss = self.renderer.gaussians.compute_regulation(
+                self.opt.time_smoothness_weight,
+                self.opt.plane_tv_weight,
+                self.opt.l1_time_planes,
+            )
             loss += self.opt.lambda_tv * tv_loss
-            
+
             # scale loss from physgaussian
             r = self.opt.scale_loss_ratio
-            scale_loss = (torch.mean(torch.maximum(torch.max(scales,dim=1).values/ \
-                                                  (torch.min(scales,dim=1).values+1e-8),\
-                                                    torch.ones_like(torch.max(scales,dim=1).values)*r))-r) * scales.shape[0]
+            scale_loss = (
+                torch.mean(
+                    torch.maximum(
+                        torch.max(scales, dim=1).values
+                        / (torch.min(scales, dim=1).values + 1e-8),
+                        torch.ones_like(torch.max(scales, dim=1).values) * r,
+                    )
+                )
+                - r
+            ) * scales.shape[0]
             loss += scale_loss
 
             # optimize step
@@ -386,17 +505,29 @@ class GUI:
 
             viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
             for idx in range(0, len(viewspace_point_tensor_list)):
-                    viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
-            radii = torch.cat(radii_list,0).max(dim=0).values
+                viewspace_point_tensor_grad = (
+                    viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
+                )
+            radii = torch.cat(radii_list, 0).max(dim=0).values
             visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
-            if self.step >= self.opt.density_start_iter and self.step <= self.opt.density_end_iter:
-                self.renderer.gaussians.max_radii2D[visibility_filter] = torch.max(self.renderer.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                self.renderer.gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
-                if self.step % self.opt.densification_interval == 1 :
-
-                    self.renderer.gaussians.densify_and_prune(self.opt.densify_grad_threshold_percent, min_opacity=0.01, extent=1, max_screen_size=2)
-
-
+            if (
+                self.step >= self.opt.density_start_iter
+                and self.step <= self.opt.density_end_iter
+            ):
+                self.renderer.gaussians.max_radii2D[visibility_filter] = torch.max(
+                    self.renderer.gaussians.max_radii2D[visibility_filter],
+                    radii[visibility_filter],
+                )
+                self.renderer.gaussians.add_densification_stats(
+                    viewspace_point_tensor_grad, visibility_filter
+                )
+                if self.step % self.opt.densification_interval == 1:
+                    self.renderer.gaussians.densify_and_prune(
+                        self.opt.densify_grad_threshold_percent,
+                        min_opacity=0.01,
+                        extent=1,
+                        max_screen_size=2,
+                    )
 
         ender.record()
         torch.cuda.synchronize()
@@ -408,18 +539,19 @@ class GUI:
             dpg.set_value("_log_train_time", f"{t:.4f}ms")
             dpg.set_value(
                 "_log_train_log",
-                 f"step = {self.step: 5d} (+{self.train_steps: 2d})\n loss = {loss.item():.4f}\nzero123_loss = {zero123_loss.item():.4f}image_loss ={image_loss.item():.4f}\nloss_alpha = {alpha_loss.item():.4f} scale_loss:{scale_loss.item():.4f} ",
+                f"step = {self.step: 5d} (+{self.train_steps: 2d})\n loss = {loss.item():.4f}\nzero123_loss = {zero123_loss.item():.4f}image_loss ={image_loss.item():.4f}\nloss_alpha = {alpha_loss.item():.4f} scale_loss:{scale_loss.item():.4f} ",
             )
 
     def set_fix_cam(self):
-        self.fixed_cam_plus=[]
+        self.fixed_cam_plus = []
         self.fixed_elevation = []
         self.fixed_azimuth = []
-        
-        pose = orbit_camera(self.opt.elevation-30,30 , self.opt.radius)
+
+        pose = orbit_camera(self.opt.elevation - 30, 30, self.opt.radius)
         self.fixed_elevation.append(-30)
         self.fixed_azimuth.append(30)
-        self.fixed_cam_plus.append(MiniCam(
+        self.fixed_cam_plus.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -427,12 +559,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation+20, 90, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation + 20, 90, self.opt.radius)
         self.fixed_elevation.append(20)
         self.fixed_azimuth.append(90)
-        self.fixed_cam_plus.append(MiniCam(
+        self.fixed_cam_plus.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -440,11 +574,13 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        pose = orbit_camera(self.opt.elevation-30, 150, self.opt.radius)
+            )
+        )
+        pose = orbit_camera(self.opt.elevation - 30, 150, self.opt.radius)
         self.fixed_elevation.append(-30)
         self.fixed_azimuth.append(150)
-        self.fixed_cam_plus.append(MiniCam(
+        self.fixed_cam_plus.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -452,12 +588,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation+20, 210, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation + 20, 210, self.opt.radius)
         self.fixed_elevation.append(+20)
         self.fixed_azimuth.append(210)
-        self.fixed_cam_plus.append(MiniCam(
+        self.fixed_cam_plus.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -465,12 +603,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation-30, 270, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation - 30, 270, self.opt.radius)
         self.fixed_elevation.append(-30)
         self.fixed_azimuth.append(270)
-        self.fixed_cam_plus.append(MiniCam(
+        self.fixed_cam_plus.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -478,12 +618,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation+20, 330, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation + 20, 330, self.opt.radius)
         self.fixed_elevation.append(20)
         self.fixed_azimuth.append(330)
-        self.fixed_cam_plus.append(MiniCam(
+        self.fixed_cam_plus.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -491,8 +633,9 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
+            )
+        )
+
     @torch.no_grad()
     def test_step(self):
         # ignore if no need to update
@@ -515,17 +658,21 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-                time=self.time
+                time=self.time,
             )
-            #print(cur_cam.time)
-            out = self.renderer.render(cur_cam, self.gaussain_scale_factor,stage=self.stage)
+            # print(cur_cam.time)
+            out = self.renderer.render(
+                cur_cam, self.gaussain_scale_factor, stage=self.stage
+            )
 
             buffer_image = out[self.mode]  # [3, H, W]
 
-            if self.mode in ['depth', 'alpha']:
+            if self.mode in ["depth", "alpha"]:
                 buffer_image = buffer_image.repeat(3, 1, 1)
-                if self.mode == 'depth':
-                    buffer_image = (buffer_image - buffer_image.min()) / (buffer_image.max() - buffer_image.min() + 1e-20)
+                if self.mode == "depth":
+                    buffer_image = (buffer_image - buffer_image.min()) / (
+                        buffer_image.max() - buffer_image.min() + 1e-20
+                    )
 
             buffer_image = F.interpolate(
                 buffer_image.unsqueeze(0),
@@ -563,58 +710,62 @@ class GUI:
                 "_texture", self.buffer_image
             )  # buffer must be contiguous, else seg fault!
 
-    
     def load_input(self, file):
         # load image
         pass
         # load image
 
     @torch.no_grad()
-    def save_renderings(self, elev=0, azim=0, radius=2, name='front'):
-        images=[]
+    def save_renderings(self, elev=0, azim=0, radius=2, name="front"):
+        images = []
         for i in np.arange(self.frames):
-            
             pose = orbit_camera(elev, azim, radius)
             cam = MiniCam(
-            pose,
-            self.opt.ref_size,
-            self.opt.ref_size,
-            self.cam.fovy,
-            self.cam.fovx,
-            self.cam.near,
-            self.cam.far,
-            )   
-            cam.time=float(i/self.frames)
-            out = self.renderer.render(cam,stage=self.stage)
+                pose,
+                self.opt.ref_size,
+                self.opt.ref_size,
+                self.cam.fovy,
+                self.cam.fovx,
+                self.cam.near,
+                self.cam.far,
+            )
+            cam.time = float(i / self.frames)
+            out = self.renderer.render(cam, stage=self.stage)
             image = out["image"].unsqueeze(0)
             images.append(image)
-            os.makedirs(f'./valid/{self.opt.save_path}/{self.step}_{name}',exist_ok=True)
-            save_image_to_local(image[0].detach(),f'./valid/{self.opt.save_path}/{self.step}_{name}/{str(i).zfill(2)}.jpg')
-        samples=torch.cat(images,dim=0)
-        
+            os.makedirs(
+                f"./valid/{self.opt.save_path}/{self.step}_{name}", exist_ok=True
+            )
+            save_image_to_local(
+                image[0].detach(),
+                f"./valid/{self.opt.save_path}/{self.step}_{name}/{str(i).zfill(2)}.jpg",
+            )
+        samples = torch.cat(images, dim=0)
+
         vid = (
-            (rearrange(samples, "t c h w -> t h w c") * 255).clamp(0,255).detach()
+            (rearrange(samples, "t c h w -> t h w c") * 255)
+            .clamp(0, 255)
+            .detach()
             .cpu()
             .numpy()
             .astype(np.uint8)
         )
-        video_path = f'./valid/{self.opt.save_path}/{self.step}_{name}/video.mp4'
+        video_path = f"./valid/{self.opt.save_path}/{self.step}_{name}/video.mp4"
         imageio.mimwrite(video_path, vid)
 
-
     @torch.no_grad()
-    def save_model(self, mode='geo', texture_size=1024):
+    def save_model(self, mode="geo", texture_size=1024):
         os.makedirs(self.opt.outdir, exist_ok=True)
-        if mode == 'geo':
-            path = os.path.join(self.opt.outdir, self.opt.save_path + '_model.ply')
+        if mode == "geo":
+            path = os.path.join(self.opt.outdir, self.opt.save_path + "_model.ply")
             self.renderer.gaussians.save_ply(path)
 
-        elif mode == 'geo+tex':
-            path = os.path.join(self.opt.outdir, self.opt.save_path + '_model.ply')
+        elif mode == "geo+tex":
+            path = os.path.join(self.opt.outdir, self.opt.save_path + "_model.ply")
             self.renderer.gaussians.save_ply(path)
 
         else:
-            path = os.path.join(self.opt.outdir, self.opt.save_path + '_model.ply')
+            path = os.path.join(self.opt.outdir, self.opt.save_path + "_model.ply")
             self.renderer.gaussians.save_ply(path)
 
         print(f"[INFO] save model to {path}.")
@@ -677,7 +828,6 @@ class GUI:
 
             # init stuff
             with dpg.collapsing_header(label="Initialize", default_open=True):
-
                 # seed stuff
                 def callback_set_seed(sender, app_data):
                     self.seed = app_data
@@ -716,7 +866,7 @@ class GUI:
                         callback=lambda: dpg.show_item("file_dialog_tag"),
                     )
                     dpg.add_text("", tag="_log_input")
-                
+
                 # overlay stuff
                 with dpg.group(horizontal=True):
 
@@ -744,7 +894,7 @@ class GUI:
                     )
 
                 # prompt stuff
-            
+
                 dpg.add_input_text(
                     label="prompt",
                     default_value=self.prompt,
@@ -770,7 +920,7 @@ class GUI:
                         label="model",
                         tag="_button_save_model",
                         callback=callback_save,
-                        user_data='model',
+                        user_data="model",
                     )
                     dpg.bind_item_theme("_button_save_model", theme_button)
 
@@ -778,7 +928,7 @@ class GUI:
                         label="geo",
                         tag="_button_save_mesh",
                         callback=callback_save,
-                        user_data='geo',
+                        user_data="geo",
                     )
                     dpg.bind_item_theme("_button_save_mesh", theme_button)
 
@@ -786,7 +936,7 @@ class GUI:
                         label="geo+tex",
                         tag="_button_save_mesh_with_tex",
                         callback=callback_save,
-                        user_data='geo+tex',
+                        user_data="geo+tex",
                     )
                     dpg.bind_item_theme("_button_save_mesh_with_tex", theme_button)
 
@@ -960,24 +1110,20 @@ class GUI:
                 self.train_step()
             self.test_step()
             dpg.render_dearpygui_frame()
-    
+
     # no gui mode
     def train(self, iters=500):
-        
         if iters > 0:
             self.prepare_train()
             for i in tqdm.trange(iters):
                 self.train_step()
             # do a last prune
-            #self.renderer.gaussians.prune(min_opacity=0.01, extent=1, max_screen_size=1)
-            
+            # self.renderer.gaussians.prune(min_opacity=0.01, extent=1, max_screen_size=1)
 
-            
-            
         # save
-        self.save_model(mode='model')
-        self.save_model(mode='geo+tex')
-        
+        self.save_model(mode="model")
+        self.save_model(mode="geo+tex")
+
 
 if __name__ == "__main__":
     import argparse
@@ -995,4 +1141,4 @@ if __name__ == "__main__":
     if opt.gui:
         gui.render()
     else:
-        gui.train(opt.save_step+1)
+        gui.train(opt.save_step + 1)
