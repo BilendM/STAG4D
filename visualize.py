@@ -1,34 +1,31 @@
 import os
-import cv2
-import time
-import tqdm
-import numpy as np
-import dearpygui.dearpygui as dpg
 
+import cv2
+import dearpygui.dearpygui as dpg
+import imageio
+import numpy as np
+import rembg
 import torch
 import torch.nn.functional as F
-
-import rembg
-import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from cam_utils import orbit_camera, OrbitCamera
-from gs_renderer_4d import Renderer, MiniCam
-from dataset_4d import SparseDataset
-from einops import rearrange, repeat
 import torchvision.utils as vutils
-import imageio
+from einops import rearrange
+
+from cam_utils import OrbitCamera, orbit_camera
+from gs_renderer_4d import MiniCam, Renderer
+
 
 def save_image_to_local(image_tensor, file_path):
     # Ensure the image tensor is in the range [0, 1]
-    image_tensor = image_tensor.clamp(0, 1) 
+    image_tensor = image_tensor.clamp(0, 1)
 
     # Save the image tensor to the specified file path
     vutils.save_image(image_tensor, file_path)
+
+
 class GUI:
     def __init__(self, opt):
         self.opt = opt  # shared with the trainer's opt to support in-place modification of rendering parameters.
-        self.gui = opt.gui # enable gui
+        self.gui = opt.gui  # enable gui
         self.W = opt.W
         self.H = opt.H
         self.cam = OrbitCamera(opt.W, opt.H, r=opt.radius, fovy=opt.fovy)
@@ -52,7 +49,7 @@ class GUI:
         # renderer
         self.renderer = Renderer(sh_degree=self.opt.sh_degree)
         self.gaussain_scale_factor = 1
-    
+
         # input image
         self.input_img = None
         self.input_mask = None
@@ -60,7 +57,6 @@ class GUI:
         self.input_mask_torch = None
         self.overlay_input_img = False
         self.overlay_input_img_ratio = 0.5
-
 
         # input text
         self.prompt = ""
@@ -71,21 +67,19 @@ class GUI:
         self.optimizer = None
         self.step = 0
         self.t = 0
-        self.time =0
+        self.time = 0
         self.train_steps = 1  # steps per rendering loop
-        
-        self.path =self.opt.path
+
+        self.path = self.opt.path
         if self.opt.size is not None:
             self.size = self.opt.size
         else:
-            self.size = len(os.listdir(os.path.join(self.path,'ref')))
-        self.frames=self.size
-
+            self.size = len(os.listdir(os.path.join(self.path, "ref")))
+        self.frames = self.size
 
         # override if provide a checkpoint
-        
-        self.renderer.initialize(num_pts=5000)            
 
+        self.renderer.initialize(num_pts=5000)
 
         if self.gui:
             dpg.create_context()
@@ -113,12 +107,11 @@ class GUI:
 
         # prepare embeddings
 
-            #save_image_to_local(self.input_img_torch[0],'./valild2/ref_{}.jpg'.format(idx))
-            #save_image_to_local(self.input_img_torch_batch[idx][0],'./valild2/batch_{}.jpg'.format(idx))
-            #save_image_to_local(self.input_imgs_torch[0][0].detach(),'./valild2/ref0_{}.jpg'.format(idx))
+        # save_image_to_local(self.input_img_torch[0],'./valild2/ref_{}.jpg'.format(idx))
+        # save_image_to_local(self.input_img_torch_batch[idx][0],'./valild2/batch_{}.jpg'.format(idx))
+        # save_image_to_local(self.input_imgs_torch[0][0].detach(),'./valild2/ref0_{}.jpg'.format(idx))
 
     def prepare_train(self):
-
         self.step = 0
 
         # setup training
@@ -145,49 +138,44 @@ class GUI:
         # lazy load guidance model
         if self.guidance_sd is None and self.enable_sd:
             if self.opt.mvdream:
-                print(f"[INFO] loading MVDream...")
+                print("[INFO] loading MVDream...")
                 from guidance.mvdream_utils import MVDream
+
                 self.guidance_sd = MVDream(self.device)
-                print(f"[INFO] loaded MVDream!")
+                print("[INFO] loaded MVDream!")
             else:
-                print(f"[INFO] loading SD...")
+                print("[INFO] loading SD...")
                 from guidance.sd_utils import StableDiffusion
+
                 self.guidance_sd = StableDiffusion(self.device)
-                print(f"[INFO] loaded SD!")
+                print("[INFO] loaded SD!")
 
-
-
-
-
-        #self.renderer.gaussians.initialize_post_first_timestep()
+        # self.renderer.gaussians.initialize_post_first_timestep()
 
     def train_step(self):
         starter = torch.cuda.Event(enable_timing=True)
         ender = torch.cuda.Event(enable_timing=True)
         starter.record()
-        
-        self.stage='fine'
-        
-        if self.opt.load_step==None: 
-            self.step=8000
+
+        self.stage = "fine"
+
+        if self.opt.load_step == None:
+            self.step = 8000
         else:
             self.step = self.opt.load_step
-        auto_path = os.path.join(self.opt.outdir,self.opt.save_path + str(self.step))
-        #os.makedirs(auto_path,exist_ok=True)
-        ply_path = os.path.join(auto_path,'model.ply')
+        auto_path = os.path.join(self.opt.outdir, self.opt.save_path + str(self.step))
+        # os.makedirs(auto_path,exist_ok=True)
+        ply_path = os.path.join(auto_path, "model.ply")
         self.renderer.gaussians.load_model(auto_path)
         self.renderer.gaussians.load_ply(ply_path)
 
-
         self.renderer.gaussians.update_learning_rate(self.step)
-        
 
-        self.save_renderings(name='front')
-        self.save_renderings(azim=180,name='back')
-        self.save_renderings(azim=-30,name='front_moving',interval=2)
-        self.save_renderings(azim=150,name='back_moving',interval=2)
-        self.save_renderings(azim=0,name='round',interval=360//self.size)
-        
+        self.save_renderings(name="front")
+        self.save_renderings(azim=180, name="back")
+        self.save_renderings(azim=-30, name="front_moving", interval=2)
+        self.save_renderings(azim=150, name="back_moving", interval=2)
+        self.save_renderings(azim=0, name="round", interval=360 // self.size)
 
         ender.record()
         torch.cuda.synchronize()
@@ -199,83 +187,276 @@ class GUI:
             dpg.set_value("_log_train_time", f"{t:.4f}ms")
             dpg.set_value(
                 "_log_train_log",
-                 f"step = {self.step: 5d} (+{self.train_steps: 2d}) loss = {tv_loss.item():.4f}tv_loss = {loss.item():.4f}\nzero123_loss = {zero123_loss.item():.4f}image_loss ={image_loss.item():.4f} ",
+                f"step = {self.step: 5d} (+{self.train_steps: 2d}) loss = {tv_loss.item():.4f}tv_loss = {loss.item():.4f}\nzero123_loss = {zero123_loss.item():.4f}image_loss ={image_loss.item():.4f} ",
             )
 
     @torch.no_grad()
-    def save_renderings(self, elev=0, azim=0, radius=2, name='front', interval=0):
-        if interval==0:
-            images=[]
+    def save_renderings(self, elev=0, azim=0, radius=2, name="front", interval=0):
+        if interval == 0:
+            images = []
             for i in np.arange(self.frames):
-                
                 pose = orbit_camera(elev, azim, radius)
                 cam = MiniCam(
-                pose,
-                self.opt.ref_size,
-                self.opt.ref_size,
-                self.cam.fovy,
-                self.cam.fovx,
-                self.cam.near,
-                self.cam.far,
-                )   
-                cam.time=float(i/self.frames)
-                out = self.renderer.render(cam,stage=self.stage)
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
                 image = out["image"].unsqueeze(0)
                 images.append(image)
-                #os.makedirs(f'./valid/{self.opt.save_path}/final_{name}',exist_ok=True)
-                #save_image_to_local(image[0].detach(),f'./valid/{self.opt.save_path}/final_{name}/{str(i).zfill(2)}.jpg')
-            samples=torch.cat(images,dim=0)
-            
+                # os.makedirs(f'./valid/{self.opt.save_path}/final_{name}',exist_ok=True)
+                # save_image_to_local(image[0].detach(),f'./valid/{self.opt.save_path}/final_{name}/{str(i).zfill(2)}.jpg')
+            samples = torch.cat(images, dim=0)
+
             vid = (
-                (rearrange(samples, "t c h w -> t h w c") * 255).clamp(0,255).detach()
+                (rearrange(samples, "t c h w -> t h w c") * 255)
+                .clamp(0, 255)
+                .detach()
                 .cpu()
                 .numpy()
                 .astype(np.uint8)
             )
-            video_path = f'./valid/{self.opt.save_path}/video_{name}.mp4'
+            video_path = f"./valid/{self.opt.save_path}/video_{name}.mp4"
             imageio.mimwrite(video_path, vid)
         else:
-            images=[]
+            images = []
             for i in np.arange(self.frames):
-                
-                pose = orbit_camera(elev, (azim+interval*i)%360, radius)
+                pose = orbit_camera(elev, (azim + interval * i) % 360, radius)
                 cam = MiniCam(
-                pose,
-                self.opt.ref_size,
-                self.opt.ref_size,
-                self.cam.fovy,
-                self.cam.fovx,
-                self.cam.near,
-                self.cam.far,
-                )   
-                cam.time=float(i/self.frames)
-                out = self.renderer.render(cam,stage=self.stage)
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
                 image = out["image"].unsqueeze(0)
                 images.append(image)
-                #os.makedirs(f'./valid/{self.opt.save_path}/final_{name}',exist_ok=True)
-                #save_image_to_local(image[0].detach(),f'./valid/{self.opt.save_path}/final_{name}/{str(i).zfill(2)}.jpg')
-            samples=torch.cat(images,dim=0)
-            
+                # os.makedirs(f'./valid/{self.opt.save_path}/final_{name}',exist_ok=True)
+                # save_image_to_local(image[0].detach(),f'./valid/{self.opt.save_path}/final_{name}/{str(i).zfill(2)}.jpg')
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, 0, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -3 * i, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 30).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -90, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 60).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -3 * i - 90, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 90).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -180, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 120).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -3 * i - 180, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 150).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -270, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 180).zfill(3)
+                    ),
+                )
+            for i in np.arange(self.frames):
+                pose = orbit_camera(self.opt.elevation, -3 * i - 270, self.opt.radius)
+                cam = MiniCam(
+                    pose,
+                    self.opt.ref_size,
+                    self.opt.ref_size,
+                    self.cam.fovy,
+                    self.cam.fovx,
+                    self.cam.near,
+                    self.cam.far,
+                )
+                cam.time = float(i / self.frames)
+                out = self.renderer.render(cam, stage=self.stage)
+                image = out["image"].unsqueeze(0)
+                os.makedirs(
+                    "./valid/{}/{}_compare".format(self.opt.save_path, self.step),
+                    exist_ok=True,
+                )
+                save_image_to_local(
+                    image[0].detach(),
+                    "./valid/{}/{}_compare/{}.jpg".format(
+                        self.opt.save_path, self.step, str(i + 2100).zfill(3)
+                    ),
+                )
+            samples = torch.cat(images, dim=0)
+
             vid = (
-                (rearrange(samples, "t c h w -> t h w c") * 255).clamp(0,255).detach()
+                (rearrange(samples, "t c h w -> t h w c") * 255)
+                .clamp(0, 255)
+                .detach()
                 .cpu()
                 .numpy()
                 .astype(np.uint8)
             )
-            video_path = f'./valid/{self.opt.save_path}/video_{name}.mp4'
+            video_path = f"./valid/{self.opt.save_path}/video_{name}.mp4"
             imageio.mimwrite(video_path, vid)
-            
-        
-        
+
     def set_fix_cam2(self):
-        self.fixed_cam2=[]
+        self.fixed_cam2 = []
         self.fixed_elevation = []
         self.fixed_azimuth = []
-        
-        pose = orbit_camera(self.opt.elevation-30,30 , self.opt.radius)
+
+        pose = orbit_camera(self.opt.elevation - 30, 30, self.opt.radius)
         self.fixed_elevation.append(-30)
         self.fixed_azimuth.append(30)
-        self.fixed_cam2.append(MiniCam(
+        self.fixed_cam2.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -283,12 +464,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation+20, 90, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation + 20, 90, self.opt.radius)
         self.fixed_elevation.append(20)
         self.fixed_azimuth.append(90)
-        self.fixed_cam2.append(MiniCam(
+        self.fixed_cam2.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -296,11 +479,13 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        pose = orbit_camera(self.opt.elevation-30, 150, self.opt.radius)
+            )
+        )
+        pose = orbit_camera(self.opt.elevation - 30, 150, self.opt.radius)
         self.fixed_elevation.append(-30)
         self.fixed_azimuth.append(150)
-        self.fixed_cam2.append(MiniCam(
+        self.fixed_cam2.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -308,12 +493,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation+20, 210, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation + 20, 210, self.opt.radius)
         self.fixed_elevation.append(+20)
         self.fixed_azimuth.append(210)
-        self.fixed_cam2.append(MiniCam(
+        self.fixed_cam2.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -321,12 +508,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation-30, 270, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation - 30, 270, self.opt.radius)
         self.fixed_elevation.append(-30)
         self.fixed_azimuth.append(270)
-        self.fixed_cam2.append(MiniCam(
+        self.fixed_cam2.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -334,12 +523,14 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
-        pose = orbit_camera(self.opt.elevation+20, 330, self.opt.radius)
+            )
+        )
+
+        pose = orbit_camera(self.opt.elevation + 20, 330, self.opt.radius)
         self.fixed_elevation.append(20)
         self.fixed_azimuth.append(330)
-        self.fixed_cam2.append(MiniCam(
+        self.fixed_cam2.append(
+            MiniCam(
                 pose,
                 self.opt.ref_size,
                 self.opt.ref_size,
@@ -347,8 +538,9 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-            ))
-        
+            )
+        )
+
     @torch.no_grad()
     def test_step(self):
         # ignore if no need to update
@@ -371,17 +563,19 @@ class GUI:
                 self.cam.fovx,
                 self.cam.near,
                 self.cam.far,
-                time=self.time
+                time=self.time,
             )
-            #print(cur_cam.time)
+            # print(cur_cam.time)
             out = self.renderer.render(cur_cam, self.gaussain_scale_factor)
 
             buffer_image = out[self.mode]  # [3, H, W]
 
-            if self.mode in ['depth', 'alpha']:
+            if self.mode in ["depth", "alpha"]:
                 buffer_image = buffer_image.repeat(3, 1, 1)
-                if self.mode == 'depth':
-                    buffer_image = (buffer_image - buffer_image.min()) / (buffer_image.max() - buffer_image.min() + 1e-20)
+                if self.mode == "depth":
+                    buffer_image = (buffer_image - buffer_image.min()) / (
+                        buffer_image.max() - buffer_image.min() + 1e-20
+                    )
 
             buffer_image = F.interpolate(
                 buffer_image.unsqueeze(0),
@@ -419,39 +613,39 @@ class GUI:
                 "_texture", self.buffer_image
             )  # buffer must be contiguous, else seg fault!
 
-    
     def load_input(self, file):
         # load image
 
         # load image
         import glob
-        self.input_imgs=[]
-        self.input_masks=[]
+
+        self.input_imgs = []
+        self.input_masks = []
         file_list = glob.glob(self.pattern)
-        print(self.pattern,file_list)
+        print(self.pattern, file_list)
         for files in sorted(file_list):
-                    print(f"Reading file: {self.pattern}")
-                   
-                    print(f'[INFO] load image from {files}...')
-                    img = cv2.imread(files, cv2.IMREAD_UNCHANGED)
-                    if img.shape[-1] == 3:
-                        if self.bg_remover is None:
-                            self.bg_remover = rembg.new_session()
-                        img = rembg.remove(img, session=self.bg_remover)
+            print(f"Reading file: {self.pattern}")
 
-                    img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
-                    img = img.astype(np.float32) / 255.0
+            print(f"[INFO] load image from {files}...")
+            img = cv2.imread(files, cv2.IMREAD_UNCHANGED)
+            if img.shape[-1] == 3:
+                if self.bg_remover is None:
+                    self.bg_remover = rembg.new_session()
+                img = rembg.remove(img, session=self.bg_remover)
 
-                    self.input_mask = img[..., 3:]
-                    # white bg
-                    self.input_img = img[..., :3] * self.input_mask + (1 - self.input_mask)
-                    # bgr to rgb
-                    self.input_img = self.input_img[..., ::-1].copy()
-                    
-                    self.input_imgs.append(self.input_img)
-                    self.input_masks.append(self.input_mask)
-        
-        print(f'[INFO] load image from {file}...')
+            img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
+            img = img.astype(np.float32) / 255.0
+
+            self.input_mask = img[..., 3:]
+            # white bg
+            self.input_img = img[..., :3] * self.input_mask + (1 - self.input_mask)
+            # bgr to rgb
+            self.input_img = self.input_img[..., ::-1].copy()
+
+            self.input_imgs.append(self.input_img)
+            self.input_masks.append(self.input_mask)
+
+        print(f"[INFO] load image from {file}...")
         img = cv2.imread(file, cv2.IMREAD_UNCHANGED)
         if img.shape[-1] == 3:
             if self.bg_remover is None:
@@ -470,24 +664,23 @@ class GUI:
         # load prompt
         file_prompt = file.replace("_rgba.png", "_caption.txt")
         if os.path.exists(file_prompt):
-            print(f'[INFO] load prompt from {file_prompt}...')
+            print(f"[INFO] load prompt from {file_prompt}...")
             with open(file_prompt, "r") as f:
                 self.prompt = f.read().strip()
-                
 
     @torch.no_grad()
-    def save_model(self, mode='geo', texture_size=1024):
+    def save_model(self, mode="geo", texture_size=1024):
         os.makedirs(self.opt.outdir, exist_ok=True)
-        if mode == 'geo':
-            path = os.path.join(self.opt.outdir, self.opt.save_path + '_model.ply')
+        if mode == "geo":
+            path = os.path.join(self.opt.outdir, self.opt.save_path + "_model.ply")
             self.renderer.gaussians.save_ply(path)
 
-        elif mode == 'geo+tex':
-            path = os.path.join(self.opt.outdir, self.opt.save_path + '_model.ply')
+        elif mode == "geo+tex":
+            path = os.path.join(self.opt.outdir, self.opt.save_path + "_model.ply")
             self.renderer.gaussians.save_ply(path)
 
         else:
-            path = os.path.join(self.opt.outdir, self.opt.save_path + '_model.ply')
+            path = os.path.join(self.opt.outdir, self.opt.save_path + "_model.ply")
             self.renderer.gaussians.save_ply(path)
 
         print(f"[INFO] save model to {path}.")
@@ -550,7 +743,6 @@ class GUI:
 
             # init stuff
             with dpg.collapsing_header(label="Initialize", default_open=True):
-
                 # seed stuff
                 def callback_set_seed(sender, app_data):
                     self.seed = app_data
@@ -589,7 +781,7 @@ class GUI:
                         callback=lambda: dpg.show_item("file_dialog_tag"),
                     )
                     dpg.add_text("", tag="_log_input")
-                
+
                 # overlay stuff
                 with dpg.group(horizontal=True):
 
@@ -617,7 +809,7 @@ class GUI:
                     )
 
                 # prompt stuff
-            
+
                 dpg.add_input_text(
                     label="prompt",
                     default_value=self.prompt,
@@ -643,7 +835,7 @@ class GUI:
                         label="model",
                         tag="_button_save_model",
                         callback=callback_save,
-                        user_data='model',
+                        user_data="model",
                     )
                     dpg.bind_item_theme("_button_save_model", theme_button)
 
@@ -651,7 +843,7 @@ class GUI:
                         label="geo",
                         tag="_button_save_mesh",
                         callback=callback_save,
-                        user_data='geo',
+                        user_data="geo",
                     )
                     dpg.bind_item_theme("_button_save_mesh", theme_button)
 
@@ -659,7 +851,7 @@ class GUI:
                         label="geo+tex",
                         tag="_button_save_mesh_with_tex",
                         callback=callback_save,
-                        user_data='geo+tex',
+                        user_data="geo+tex",
                     )
                     dpg.bind_item_theme("_button_save_mesh_with_tex", theme_button)
 
@@ -833,21 +1025,22 @@ class GUI:
                 self.train_step()
             self.test_step()
             dpg.render_dearpygui_frame()
-    
+
     # no gui mode
     def train(self, iters=500):
         self.prepare_train()
 
         self.train_step()
-            # do a last prune
-        #self.renderer.gaussians.prune(min_opacity=0.01, extent=1, max_screen_size=1)
+        # do a last prune
+        # self.renderer.gaussians.prune(min_opacity=0.01, extent=1, max_screen_size=1)
         # save
-        self.save_model(mode='model')
-        self.save_model(mode='geo+tex')
-        
+        self.save_model(mode="model")
+        self.save_model(mode="geo+tex")
+
 
 if __name__ == "__main__":
     import argparse
+
     from omegaconf import OmegaConf
 
     parser = argparse.ArgumentParser()
