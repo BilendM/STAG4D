@@ -176,6 +176,7 @@ class GUI:
         self.save_renderings(azim=-30, name="front_moving", interval=2)
         self.save_renderings(azim=150, name="back_moving", interval=2)
         self.save_renderings(azim=0, name="round", interval=360 // self.size)
+        self.save_renderings(azim=0, name="round_compare", interval=360 // self.size)
 
         ender.record()
         torch.cuda.synchronize()
